@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<title>Spring & Ontwijk</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<style>
+  :root {
+    --bg: #eef2f7;
+    --panel: #ffffff;
+    --text: #1c2733;
+    --muted: #5b6b7c;
+    --accent: #2f6fed;
+    --accent2: #ff6b6b;
+    --ground: #3c4a5e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14181f;
+      --panel: #1e242e;
+      --text: #eef2f7;
+      --muted: #9aa7b6;
+      --accent: #5b8bf0;
+      --accent2: #ff7d7d;
+      --ground: #2a323f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14181f;
+    --panel: #1e242e;
+    --text: #eef2f7;
+    --muted: #9aa7b6;
+    --accent: #5b8bf0;
+    --accent2: #ff7d7d;
+    --ground: #2a323f;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+    padding: 12px;
+  }
+  #wrap {
+    width: 100%;
+    max-width: 480px;
+  }
+  h1 {
+    font-size: 1.1rem;
+    margin: 0 0 8px 2px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  #hud {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0 2px 8px 2px;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  #score {
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: var(--accent);
+  }
+  #canvasBox {
+    position: relative;
+    width: 100%;
+    border-radius: 16px;
+    overflow: hidden;
+    background: var(--panel);
+    box-shadow: 0 4px 18px rgba(0,0,0,0.15);
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: rgba(0,0,0,0.45);
+    color: white;
+    text-align: center;
+    padding: 20px;
+  }
+  #overlay.hidden { display: none; }
+  #overlay h2 { margin: 0; font-size: 1.4rem; }
+  #overlay p { margin: 0; color: #dfe6ee; font-size: 0.95rem; }
+  button {
+    appearance: none;
+    border: none;
+    background: var(--accent);
+    color: white;
+    font-weight: 700;
+    font-size: 1rem;
+    padding: 12px 24px;
+    border-radius: 12px;
+    margin-top: 6px;
+  }
+  button:active { transform: scale(0.96); }
+  #footer {
+    margin-top: 10px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="wrap">
+    <h1>🐦 Spring & Ontwijk</h1>
+    <div id="hud">
+      <div>Score: <span id="score">0</span></div>
+      <div>Beste: <span id="best">0</span></div>
+    </div>
+    <div id="canvasBox">
+      <canvas id="game" width="480" height="640"></canvas>
+      <div id="overlay">
+        <h2 id="overlayTitle">Tik om te springen</h2>
+        <p id="overlayText">Ontwijk de blokken zo lang mogelijk. Tik of tik op de knop om te starten.</p>
+        <button id="startBtn">Start</button>
+      </div>
+    </div>
+    <div id="footer">Tik ergens op het scherm om te springen</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlayTitle');
+  const overlayText = document.getElementById('overlayText');
+  const startBtn = document.getElementById('startBtn');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+
+  const W = canvas.width, H = canvas.height;
+  const groundY = H - 80;
+
+  let best = 0;
+  try {
+    const stored = localStorage.getItem('springontwijk-best');
+    if (stored) best = parseInt(stored, 10) || 0;
+  } catch (e) { /* storage unavailable, ignore */ }
+  bestEl.textContent = best;
+
+  let state = 'ready'; // ready | playing | over
+  let player, obstacles, speed, gravity, score, frame, spawnTimer;
+
+  function reset() {
+    player = { x: 90, y: groundY - 40, w: 34, h: 40, vy: 0, onGround: true };
+    obstacles = [];
+    speed = 6;
+    gravity = 0.9;
+    score = 0;
+    frame = 0;
+    spawnTimer = 0;
+    scoreEl.textContent = '0';
+  }
+
+  function jump() {
+    if (state === 'ready') { startGame(); return; }
+    if (state === 'over') { startGame(); return; }
+    if (player.onGround) {
+      player.vy = -15.5;
+      player.onGround = false;
+    }
+  }
+
+  function startGame() {
+    reset();
+    state = 'playing';
+    overlay.classList.add('hidden');
+    requestAnimationFrame(loop);
+  }
+
+  function gameOver() {
+    state = 'over';
+    if (score > best) {
+      best = score;
+      bestEl.textContent = best;
+      try { localStorage.setItem('springontwijk-best', String(best)); } catch (e) {}
+    }
+    overlayTitle.textContent = 'Game over!';
+    overlayText.textContent = 'Score: ' + score + '  •  Beste: ' + best;
+    startBtn.textContent = 'Opnieuw';
+    overlay.classList.remove('hidden');
+  }
+
+  function spawnObstacle() {
+    const h = 30 + Math.random() * 50;
+    obstacles.push({ x: W + 20, y: groundY - h, w: 26 + Math.random()*14, h: h, passed: false });
+  }
+
+  function update() {
+    frame++;
+    // player physics
+    player.vy += gravity;
+    player.y += player.vy;
+    if (player.y >= groundY - player.h) {
+      player.y = groundY - player.h;
+      player.vy = 0;
+      player.onGround = true;
+    }
+
+    // speed ramps up slowly
+    speed = 6 + Math.min(6, score * 0.05);
+
+    // spawn
+    spawnTimer -= 1;
+    if (spawnTimer <= 0) {
+      spawnObstacle();
+      spawnTimer = 55 + Math.random() * 45 - Math.min(30, score);
+      if (spawnTimer < 32) spawnTimer = 32;
+    }
+
+    // move obstacles
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+      const o = obstacles[i];
+      o.x -= speed;
+      if (!o.passed && o.x + o.w < player.x) {
+        o.passed = true;
+        score++;
+        scoreEl.textContent = String(score);
+      }
+      if (o.x + o.w < -20) obstacles.splice(i, 1);
+
+      // collision (simple AABB with a little forgiveness)
+      const pad = 6;
+      if (
+        player.x + pad < o.x + o.w &&
+        player.x + player.w - pad > o.x &&
+        player.y + pad < o.y + o.h &&
+        player.y + player.h - pad > o.y
+      ) {
+        gameOver();
+      }
+    }
+  }
+
+  function draw() {
+    // background
+    ctx.clearRect(0, 0, W, H);
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, '#7fb3ff');
+    bgGrad.addColorStop(1, '#cfe6ff');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, groundY);
+
+    // soft clouds
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    for (let i = 0; i < 3; i++) {
+      const cx = ((frame * 0.3) + i * 220) % (W + 100) - 50;
+      ctx.beginPath();
+      ctx.ellipse(cx, 60 + i*40, 30, 14, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // ground
+    ctx.fillStyle = '#3c4a5e';
+    ctx.fillRect(0, groundY, W, H - groundY);
+    ctx.fillStyle = '#4f6076';
+    for (let x = -((frame*speed)%40); x < W; x += 40) {
+      ctx.fillRect(x, groundY, 20, 6);
+    }
+
+    // player (simple bird/blob)
+    ctx.fillStyle = '#ff6b6b';
+    roundRect(ctx, player.x, player.y, player.w, player.h, 8);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(player.x + player.w - 8, player.y + 10, 4, 0, Math.PI*2);
+    ctx.fill();
+
+    // obstacles
+    ctx.fillStyle = '#2f6fed';
+    obstacles.forEach(o => {
+      roundRect(ctx, o.x, o.y, o.w, o.h, 6);
+      ctx.fill();
+    });
+  }
+
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function loop() {
+    if (state !== 'playing') return;
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // input
+  function handleTap(e) {
+    e.preventDefault();
+    jump();
+  }
+  canvas.addEventListener('touchstart', handleTap, { passive: false });
+  canvas.addEventListener('mousedown', handleTap);
+  document.getElementById('app').addEventListener('touchstart', function(e){
+    if (state !== 'playing') return; // overlay handles its own taps via button
+  }, { passive: true });
+  startBtn.addEventListener('click', function(e){
+    e.stopPropagation();
+    startGame();
+  });
+
+  // initial draw
+  reset();
+  draw();
+})();
+</script>
+</body>
+</html>

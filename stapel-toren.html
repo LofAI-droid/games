@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<title>Stapel Toren</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<style>
+  :root {
+    --bg: #fdf6e9;
+    --panel: #ffffff;
+    --text: #2b2620;
+    --muted: #7a7062;
+    --accent: #ef8354;
+    --sky1: #ffd9a0;
+    --sky2: #ffb4a2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #171310;
+      --panel: #221d18;
+      --text: #f3ede2;
+      --muted: #b0a693;
+      --accent: #ff9a66;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #171310;
+    --panel: #221d18;
+    --text: #f3ede2;
+    --muted: #b0a693;
+    --accent: #ff9a66;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: manipulation;
+    user-select: none;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+    padding: 12px;
+  }
+  #wrap { width: 100%; max-width: 420px; }
+  h1 { font-size: 1.1rem; margin: 0 0 8px 2px; font-weight: 700; }
+  #hud {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0 2px 10px 2px;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  #score { font-size: 1.4rem; font-weight: 800; color: var(--accent); }
+  #canvasBox {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 3/4;
+    border-radius: 16px;
+    overflow: hidden;
+    background: var(--panel);
+    box-shadow: 0 4px 18px rgba(0,0,0,0.2);
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: rgba(0,0,0,0.5);
+    color: white;
+    text-align: center;
+    padding: 20px;
+  }
+  #overlay.hidden { display: none; }
+  #overlay h2 { margin: 0; font-size: 1.4rem; }
+  #overlay p { margin: 0; color: #f5ece0; font-size: 0.95rem; }
+  button {
+    appearance: none;
+    border: none;
+    background: var(--accent);
+    color: white;
+    font-weight: 700;
+    font-size: 1rem;
+    padding: 12px 24px;
+    border-radius: 12px;
+    margin-top: 6px;
+  }
+  button:active { transform: scale(0.96); }
+  #footer { margin-top: 10px; text-align: center; color: var(--muted); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="wrap">
+    <h1>🧱 Stapel Toren</h1>
+    <div id="hud">
+      <div>Hoogte: <span id="score">0</span></div>
+      <div>Beste: <span id="best">0</span></div>
+    </div>
+    <div id="canvasBox">
+      <canvas id="game" width="360" height="480"></canvas>
+      <div id="overlay">
+        <h2 id="overlayTitle">Tik om te laten vallen</h2>
+        <p id="overlayText">Het blok beweegt heen en weer. Tik op het juiste moment om het precies op de toren te laten vallen.</p>
+        <button id="startBtn">Start</button>
+      </div>
+    </div>
+    <div id="footer">Tik om het bewegende blok te laten vallen</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlayTitle');
+  const overlayText = document.getElementById('overlayText');
+  const startBtn = document.getElementById('startBtn');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+
+  const W = canvas.width, H = canvas.height;
+  const blockH = 34;
+
+  let best = 0;
+  try {
+    const stored = localStorage.getItem('stapeltoren-best');
+    if (stored) best = parseInt(stored, 10) || 0;
+  } catch(e) {}
+  bestEl.textContent = best;
+
+  let stack, moving, score, state, camY, speed, dir;
+
+  const hues = ['#ef8354','#f2a65a','#f4c95d','#a8d08d','#7fc8a9','#6fb1d6','#a48ad4'];
+
+  function reset() {
+    stack = [{ x: W/2 - 70, w: 140 }]; // base
+    score = 0;
+    camY = 0;
+    speed = 2.6;
+    dir = 1;
+    scoreEl.textContent = '0';
+    spawnMoving();
+  }
+
+  function spawnMoving() {
+    const top = stack[stack.length - 1];
+    moving = { x: 10, w: top.w, y: H - blockH * (stack.length + 1) };
+    dir = Math.random() < 0.5 ? -1 : 1;
+    if (dir === -1) moving.x = W - moving.w - 10;
+  }
+
+  function startGame() {
+    reset();
+    state = 'playing';
+    overlay.classList.add('hidden');
+    requestAnimationFrame(loop);
+  }
+
+  function drop() {
+    if (state !== 'playing') return;
+    const top = stack[stack.length - 1];
+    const left = Math.max(moving.x, top.x);
+    const right = Math.min(moving.x + moving.w, top.x + top.w);
+    const overlap = right - left;
+
+    if (overlap <= 4) {
+      endGame();
+      return;
+    }
+
+    stack.push({ x: left, w: overlap });
+    score++;
+    scoreEl.textContent = String(score);
+    speed = Math.min(9, 2.6 + score * 0.15);
+    spawnMoving();
+  }
+
+  function endGame() {
+    state = 'over';
+    if (score > best) {
+      best = score;
+      bestEl.textContent = best;
+      try { localStorage.setItem('stapeltoren-best', String(best)); } catch(e) {}
+    }
+    overlayTitle.textContent = 'Toren gevallen!';
+    overlayText.textContent = 'Hoogte: ' + score + '  •  Beste: ' + best;
+    startBtn.textContent = 'Opnieuw';
+    overlay.classList.remove('hidden');
+  }
+
+  function update() {
+    moving.x += speed * dir;
+    if (moving.x <= 0) { moving.x = 0; dir = 1; }
+    if (moving.x + moving.w >= W) { moving.x = W - moving.w; dir = -1; }
+
+    // camera follows tower height
+    const targetCamY = Math.max(0, (stack.length - 6) * blockH);
+    camY += (targetCamY - camY) * 0.15;
+  }
+
+  function draw() {
+    ctx.clearRect(0,0,W,H);
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0, '#ffd9a0');
+    g.addColorStop(1, '#ffb4a2');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,W,H);
+
+    // stack blocks
+    stack.forEach((b, i) => {
+      const y = H - blockH * (i + 1) + camY;
+      if (y > H || y < -blockH) return;
+      ctx.fillStyle = hues[i % hues.length];
+      ctx.fillRect(b.x, y, b.w, blockH - 2);
+      ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+      ctx.strokeRect(b.x, y, b.w, blockH - 2);
+    });
+
+    // moving block
+    if (state === 'playing') {
+      const my = moving.y + camY;
+      ctx.fillStyle = hues[stack.length % hues.length];
+      ctx.fillRect(moving.x, my, moving.w, blockH - 2);
+      ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+      ctx.strokeRect(moving.x, my, moving.w, blockH - 2);
+    }
+  }
+
+  function loop() {
+    if (state !== 'playing') return;
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  canvas.addEventListener('touchstart', function(e){
+    e.preventDefault();
+    if (state === 'ready' || state === 'over') return;
+    drop();
+  }, { passive: false });
+  canvas.addEventListener('mousedown', function(){
+    if (state === 'ready' || state === 'over') return;
+    drop();
+  });
+
+  startBtn.addEventListener('click', function(e){
+    e.stopPropagation();
+    startGame();
+  });
+
+  state = 'ready';
+  reset();
+  draw();
+})();
+</script>
+</body>
+</html>

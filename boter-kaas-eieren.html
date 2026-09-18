@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<title>Boter Kaas en Eieren</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<style>
+  :root {
+    --bg: #f4f2ee;
+    --panel: #ffffff;
+    --text: #26221c;
+    --muted: #6b6355;
+    --accent: #d1495b;
+    --accent2: #3a6ea5;
+    --line: #d8d2c6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1a1712;
+      --panel: #241f19;
+      --text: #f2ede4;
+      --muted: #b3a996;
+      --accent: #ff6b7f;
+      --accent2: #6ea3e0;
+      --line: #3a3428;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1a1712;
+    --panel: #241f19;
+    --text: #f2ede4;
+    --muted: #b3a996;
+    --accent: #ff6b7f;
+    --accent2: #6ea3e0;
+    --line: #3a3428;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: manipulation;
+    user-select: none;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+    padding: 12px;
+  }
+  #wrap { width: 100%; max-width: 400px; }
+  h1 { font-size: 1.1rem; margin: 0 0 8px 2px; font-weight: 700; }
+  #hud {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0 2px 10px 2px;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+  #status { font-weight: 700; color: var(--text); }
+  #scoreLine { font-size: 0.8rem; }
+  #boardWrap {
+    position: relative;
+    width: 100%;
+  }
+  #board {
+    width: 100%;
+    aspect-ratio: 1/1;
+    background: var(--panel);
+    border-radius: 16px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.15);
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    padding: 4%;
+    gap: 3%;
+  }
+  .cell {
+    background: var(--bg);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.6rem;
+    font-weight: 800;
+  }
+  .cell.x { color: var(--accent); }
+  .cell.o { color: var(--accent2); }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: rgba(0,0,0,0.5);
+    color: white;
+    text-align: center;
+    padding: 20px;
+    border-radius: 16px;
+    z-index: 5;
+  }
+  #overlay.hidden { display: none; }
+  #overlay h2 { margin: 0; font-size: 1.4rem; }
+  #overlay p { margin: 0; color: #f2ede4; font-size: 0.95rem; }
+  button {
+    appearance: none;
+    border: none;
+    background: var(--accent);
+    color: white;
+    font-weight: 700;
+    font-size: 1rem;
+    padding: 12px 24px;
+    border-radius: 12px;
+    margin-top: 6px;
+  }
+  button:active { transform: scale(0.96); }
+  #footer { margin-top: 10px; text-align: center; color: var(--muted); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="wrap">
+    <h1>❌⭕ Boter, Kaas en Eieren</h1>
+    <div id="hud">
+      <div id="status">Jij (❌) bent aan de beurt</div>
+      <div id="scoreLine">Jij <span id="winsP">0</span> – <span id="winsC">0</span> Computer</div>
+    </div>
+    <div id="boardWrap">
+      <div id="board"></div>
+      <div id="overlay">
+        <h2 id="overlayTitle">Boter, Kaas en Eieren</h2>
+        <p id="overlayText">Jij speelt ❌, de computer speelt ⭕. Krijg drie op een rij, kolom of diagonaal.</p>
+        <button id="startBtn">Start</button>
+      </div>
+    </div>
+    <div id="footer">Tik een vakje om te spelen</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const boardEl = document.getElementById('board');
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlayTitle');
+  const overlayText = document.getElementById('overlayText');
+  const startBtn = document.getElementById('startBtn');
+  const statusEl = document.getElementById('status');
+  const winsPEl = document.getElementById('winsP');
+  const winsCEl = document.getElementById('winsC');
+
+  let winsP = 0, winsC = 0;
+  try {
+    winsP = parseInt(localStorage.getItem('bke-winsP') || '0', 10) || 0;
+    winsC = parseInt(localStorage.getItem('bke-winsC') || '0', 10) || 0;
+  } catch(e) {}
+  winsPEl.textContent = winsP;
+  winsCEl.textContent = winsC;
+
+  const LINES = [
+    [0,1,2],[3,4,5],[6,7,8],
+    [0,3,6],[1,4,7],[2,5,8],
+    [0,4,8],[2,4,6]
+  ];
+
+  let cells, board, state, cellEls;
+
+  function buildBoard() {
+    boardEl.innerHTML = '';
+    cellEls = [];
+    board = Array(9).fill(null);
+    for (let i = 0; i < 9; i++) {
+      const c = document.createElement('div');
+      c.className = 'cell';
+      boardEl.appendChild(c);
+      cellEls.push(c);
+      c.addEventListener('touchstart', function(e){ e.preventDefault(); playerMove(i); }, { passive:false });
+      c.addEventListener('mousedown', function(){ playerMove(i); });
+    }
+  }
+
+  function winner(b) {
+    for (const [a,b1,c] of LINES) {
+      if (b[a] && b[a] === b[b1] && b[a] === b[c]) return b[a];
+    }
+    if (b.every(v => v)) return 'draw';
+    return null;
+  }
+
+  function playerMove(i) {
+    if (state !== 'player') return;
+    if (board[i]) return;
+    board[i] = 'X';
+    render();
+    const w = winner(board);
+    if (w) { finish(w); return; }
+    state = 'computer';
+    statusEl.textContent = 'Computer denkt na...';
+    setTimeout(computerMove, 450);
+  }
+
+  function computerMove() {
+    if (state !== 'computer') return;
+    const i = bestMove(board);
+    if (i !== -1) board[i] = 'O';
+    render();
+    const w = winner(board);
+    if (w) { finish(w); return; }
+    state = 'player';
+    statusEl.textContent = 'Jij (❌) bent aan de beurt';
+  }
+
+  // simple minimax, computer = O maximizing, player = X minimizing
+  function bestMove(b) {
+    let bestScore = -Infinity, move = -1;
+    for (let i = 0; i < 9; i++) {
+      if (!b[i]) {
+        b[i] = 'O';
+        const score = minimax(b, 0, false);
+        b[i] = null;
+        if (score > bestScore) { bestScore = score; move = i; }
+      }
+    }
+    return move;
+  }
+
+  function minimax(b, depth, isMax) {
+    const w = winner(b);
+    if (w === 'O') return 10 - depth;
+    if (w === 'X') return depth - 10;
+    if (w === 'draw') return 0;
+
+    if (isMax) {
+      let best = -Infinity;
+      for (let i = 0; i < 9; i++) {
+        if (!b[i]) {
+          b[i] = 'O';
+          best = Math.max(best, minimax(b, depth+1, false));
+          b[i] = null;
+        }
+      }
+      return best;
+    } else {
+      let best = Infinity;
+      for (let i = 0; i < 9; i++) {
+        if (!b[i]) {
+          b[i] = 'X';
+          best = Math.min(best, minimax(b, depth+1, true));
+          b[i] = null;
+        }
+      }
+      return best;
+    }
+  }
+
+  function render() {
+    board.forEach((v, i) => {
+      const el = cellEls[i];
+      el.textContent = v === 'X' ? '❌' : v === 'O' ? '⭕' : '';
+      el.classList.toggle('x', v === 'X');
+      el.classList.toggle('o', v === 'O');
+    });
+  }
+
+  function finish(w) {
+    state = 'over';
+    let title, text;
+    if (w === 'draw') {
+      title = 'Gelijkspel!';
+      text = 'Niemand wint deze keer.';
+    } else if (w === 'X') {
+      winsP++;
+      winsPEl.textContent = winsP;
+      try { localStorage.setItem('bke-winsP', String(winsP)); } catch(e) {}
+      title = 'Jij wint! 🎉';
+      text = 'Goed gespeeld!';
+    } else {
+      winsC++;
+      winsCEl.textContent = winsC;
+      try { localStorage.setItem('bke-winsC', String(winsC)); } catch(e) {}
+      title = 'De computer wint';
+      text = 'Probeer het nog eens.';
+    }
+    overlayTitle.textContent = title;
+    overlayText.textContent = text;
+    startBtn.textContent = 'Nog een keer';
+    overlay.classList.remove('hidden');
+    statusEl.textContent = title;
+  }
+
+  function startGame() {
+    buildBoard();
+    render();
+    state = 'player';
+    statusEl.textContent = 'Jij (❌) bent aan de beurt';
+    overlay.classList.add('hidden');
+  }
+
+  startBtn.addEventListener('click', function(e){
+    e.stopPropagation();
+    startGame();
+  });
+
+  buildBoard();
+})();
+</script>
+</body>
+</html>

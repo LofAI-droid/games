@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<title>Schuifpuzzel</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<style>
+  :root {
+    --bg: #eef3f9;
+    --panel: #ffffff;
+    --text: #1c2534;
+    --muted: #63708a;
+    --accent: #2f6fed;
+    --tile: #dbe6fb;
+    --tiletext: #1c3a75;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #10131c;
+      --panel: #1a2030;
+      --text: #eaeefb;
+      --muted: #9aa6c0;
+      --accent: #7ba0ff;
+      --tile: #2b3a5e;
+      --tiletext: #dce6ff;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10131c;
+    --panel: #1a2030;
+    --text: #eaeefb;
+    --muted: #9aa6c0;
+    --accent: #7ba0ff;
+    --tile: #2b3a5e;
+    --tiletext: #dce6ff;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: manipulation;
+    user-select: none;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+    padding: 12px;
+  }
+  #wrap { width: 100%; max-width: 400px; }
+  h1 { font-size: 1.1rem; margin: 0 0 8px 2px; font-weight: 700; }
+  #hud {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0 2px 10px 2px;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  #moves { font-size: 1.4rem; font-weight: 800; color: var(--accent); }
+  #boardWrap { position: relative; width: 100%; }
+  #board {
+    width: 100%;
+    aspect-ratio: 1/1;
+    background: var(--panel);
+    border-radius: 16px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.15);
+    padding: 3%;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    gap: 3%;
+  }
+  .tile {
+    background: var(--tile);
+    color: var(--tiletext);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.6rem;
+    font-weight: 800;
+    transition: transform 0.08s;
+  }
+  .tile.empty { background: transparent; box-shadow: none; }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: rgba(0,0,0,0.55);
+    color: white;
+    text-align: center;
+    padding: 20px;
+    border-radius: 16px;
+    z-index: 5;
+  }
+  #overlay.hidden { display: none; }
+  #overlay h2 { margin: 0; font-size: 1.4rem; }
+  #overlay p { margin: 0; color: #eaeefb; font-size: 0.95rem; }
+  button {
+    appearance: none;
+    border: none;
+    background: var(--accent);
+    color: white;
+    font-weight: 700;
+    font-size: 1rem;
+    padding: 12px 24px;
+    border-radius: 12px;
+    margin-top: 6px;
+  }
+  button:active { transform: scale(0.96); }
+  #footer { margin-top: 10px; text-align: center; color: var(--muted); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="wrap">
+    <h1>🔢 Schuifpuzzel</h1>
+    <div id="hud">
+      <div>Zetten: <span id="moves">0</span></div>
+      <div>Beste: <span id="best">–</span></div>
+    </div>
+    <div id="boardWrap">
+      <div id="board"></div>
+      <div id="overlay">
+        <h2 id="overlayTitle">Leg de nummers op volgorde</h2>
+        <p id="overlayText">Tik een tegel naast het lege vakje om te schuiven. Zet de nummers 1 t/m 15 op volgorde.</p>
+        <button id="startBtn">Start</button>
+      </div>
+    </div>
+    <div id="footer">Tik een tegel naast het lege vakje</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const board = document.getElementById('board');
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlayTitle');
+  const overlayText = document.getElementById('overlayText');
+  const startBtn = document.getElementById('startBtn');
+  const movesEl = document.getElementById('moves');
+  const bestEl = document.getElementById('best');
+
+  const N = 4;
+  let best = null;
+  try {
+    const stored = localStorage.getItem('schuifpuzzel-best');
+    if (stored) best = parseInt(stored, 10);
+  } catch(e) {}
+  bestEl.textContent = best !== null ? best : '–';
+
+  let tiles, moves, state, tileEls;
+
+  function solvedArray() {
+    const arr = [];
+    for (let i = 1; i < N*N; i++) arr.push(i);
+    arr.push(0);
+    return arr;
+  }
+
+  function isSolvable(arr) {
+    const flat = arr.filter(v => v !== 0);
+    let inv = 0;
+    for (let i = 0; i < flat.length; i++)
+      for (let j = i+1; j < flat.length; j++)
+        if (flat[i] > flat[j]) inv++;
+    const emptyRowFromBottom = N - Math.floor(arr.indexOf(0) / N);
+    if (N % 2 === 1) return inv % 2 === 0;
+    if (emptyRowFromBottom % 2 === 0) return inv % 2 === 1;
+    return inv % 2 === 0;
+  }
+
+  function shuffledSolvable() {
+    let arr;
+    do {
+      arr = solvedArray();
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i+1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+    } while (!isSolvable(arr) || isSolved(arr));
+    return arr;
+  }
+
+  function isSolved(arr) {
+    const target = solvedArray();
+    return arr.every((v,i) => v === target[i]);
+  }
+
+  function buildBoard() {
+    board.innerHTML = '';
+    tileEls = [];
+    tiles = shuffledSolvable();
+    moves = 0;
+    movesEl.textContent = '0';
+    for (let i = 0; i < N*N; i++) {
+      const el = document.createElement('div');
+      el.className = 'tile';
+      board.appendChild(el);
+      tileEls.push(el);
+      el.addEventListener('touchstart', function(e){ e.preventDefault(); tap(i); }, { passive:false });
+      el.addEventListener('mousedown', function(){ tap(i); });
+    }
+    render();
+  }
+
+  function render() {
+    tiles.forEach((v, i) => {
+      const el = tileEls[i];
+      if (v === 0) {
+        el.textContent = '';
+        el.classList.add('empty');
+      } else {
+        el.textContent = v;
+        el.classList.remove('empty');
+      }
+    });
+  }
+
+  function tap(i) {
+    if (state !== 'playing') return;
+    const emptyIdx = tiles.indexOf(0);
+    const r1 = Math.floor(i/N), c1 = i%N;
+    const r2 = Math.floor(emptyIdx/N), c2 = emptyIdx%N;
+    const adjacent = (Math.abs(r1-r2) + Math.abs(c1-c2)) === 1;
+    if (!adjacent) return;
+    [tiles[i], tiles[emptyIdx]] = [tiles[emptyIdx], tiles[i]];
+    moves++;
+    movesEl.textContent = String(moves);
+    render();
+    if (isSolved(tiles)) {
+      finish();
+    }
+  }
+
+  function finish() {
+    state = 'over';
+    if (best === null || moves < best) {
+      best = moves;
+      bestEl.textContent = best;
+      try { localStorage.setItem('schuifpuzzel-best', String(best)); } catch(e) {}
+    }
+    overlayTitle.textContent = 'Opgelost! 🎉';
+    overlayText.textContent = 'Je deed het in ' + moves + ' zetten  •  Beste: ' + best;
+    startBtn.textContent = 'Opnieuw';
+    overlay.classList.remove('hidden');
+  }
+
+  function startGame() {
+    buildBoard();
+    state = 'playing';
+    overlay.classList.add('hidden');
+  }
+
+  startBtn.addEventListener('click', function(e){
+    e.stopPropagation();
+    startGame();
+  });
+
+  state = 'ready';
+  buildBoard();
+})();
+</script>
+</body>
+</html>
